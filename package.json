@@ -1,0 +1,37 @@
+{
+  "name": "nvim-mcp",
+  "version": "0.1.0",
+  "description": "An MCP server for neovim",
+  "type": "module",
+  "bin": {
+    "nvim-mcp": "build/index.js"
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {
+    "build": "tsc && node --input-type=module -e \"import { chmodSync } from 'fs'; chmodSync('build/index.js', '755');\"",
+    "prepare": "npm run build",
+    "watch": "tsc --watch",
+    "inspect": "npx @modelcontextprotocol/inspector node build/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brianhuster/nvim-mcp-server.git"
+  },
+  "author": "Phạm Bình An",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/brianhuster/nvim-mcp-server/issues"
+  },
+  "homepage": "https://github.com/brianhuster/nvim-mcp-server#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.11.0",
+    "neovim": "^5.3.0",
+    "ts-node": "^10.9.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3"
+  }
+}

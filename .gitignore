@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build output
+build/
+dist/
+**.blob
+nvim-mcp
+
+# Environment variables
+.env
+
+# IDE and OS files
+.DS_Store
+.vscode/
+.idea/
+.editorconfig
+.nvim.lua
+tags
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+neovim
+zod
+
