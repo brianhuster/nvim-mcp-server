@@ -3,10 +3,15 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
-const vim = attach({ socket: process.env.NVIM });
+const $NVIM = process.env.NVIM;
+if (!$NVIM) {
+	console.log('$NVIM environment variable is not set');
+	process.exit(0);
+}
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const vim = attach({ socket: $NVIM });
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 vim.lua(readFileSync(`${__dirname}/../../plugin/nvim-mcp-server.lua`, 'utf8'));
 
 export const nvim = vim;

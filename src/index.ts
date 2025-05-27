@@ -4,21 +4,20 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, resolve } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const packageJson = JSON.parse(
-    readFileSync(resolve(__dirname, '../package.json'), 'utf8')
+	readFileSync(resolve(__dirname, '../package.json'), 'utf8')
 );
 
 const args = process.argv.slice(2);
 if (args.includes('-v') || args.includes('--version')) {
-    console.log(`nvim-mcp v${packageJson.version}`);
-    process.exit(0);
+	console.log(`nvim-mcp v${packageJson.version}`);
+	process.exit(0);
 }
 
 if (args.includes('-h') || args.includes('--help')) {
-    console.log(`
+	console.log(`
 nvim-mcp - An MCP server for Neovim
 
 Usage:
@@ -33,10 +32,10 @@ Description:
   integration between language models and Neovim. It enables execution of
   Vim commands, reading buffer contents, accessing Vim's help system,...
 `);
-    process.exit(0);
+	process.exit(0);
 }
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import * as nvim from './utils/nvim.js';
@@ -50,7 +49,16 @@ const server = new McpServer({
 
 server.resource(
 	"current-buffer",
-	"nvim://buffer",
+	new ResourceTemplate("nvim://buffer", {
+		list: () => ({
+			resources: [{
+				uri: "nvim://buffer",
+				mimeType: "text/plain",
+				name: "Current buffer",
+				description: "Get name and content of current buffer"
+			}]
+		})
+	}),
 	async (uri) => {
 		const buf = vim.buffer
 		const bufname = await buf.name
@@ -71,7 +79,16 @@ ${lines.join('\n')}
 
 server.resource(
 	"current-buffer-diagnostics",
-	"nvim://buffer-diagnostics",
+	new ResourceTemplate("nvim://buffer-diagnostics", {
+		list: () => ({
+			resources: [{
+				uri: "nvim://buffer-diagnostics",
+				mimeType: "application/json",
+				name: "Current buffer diagnostics",
+				description: "Get diagnostics for current buffer"
+			}]
+		}),
+	}),
 	async (uri) => {
 		const diagnostics = await nvim.getDiagnosticsFromBuf(0);
 		return {
