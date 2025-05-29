@@ -10,18 +10,22 @@ function NvimMcpServer.get_diagnostics_from_file(buf)
 		}
 	end
 	local diagnostics = vim.diagnostic.get(bufnr)
-	return vim.iter(diagnostics):map(function(diagnostic)
-		return {
-			line = diagnostic.lnum + 1,
-			end_line = diagnostic.end_lnum + 1,
-			col = diagnostic.col,
-			end_col = diagnostic.end_col,
-			text = table.concat(vim.api.nvim_buf_get_lines(bufnr, diagnostic.lnum, diagnostic.end_lnum + 1, false), '\n'),
-			message = diagnostic.message,
-			severity = diagnostic.severity,
-			source = diagnostic.source,
-		}
-	end):totable()
+	local severity_map = {
+		[vim.diagnostic.severity.ERROR] = "Error",
+		[vim.diagnostic.severity.WARN] = "Warning",
+		[vim.diagnostic.severity.INFO] = "Information",
+		[vim.diagnostic.severity.HINT] = "Hint",
+	}
+	return vim.iter(diagnostics):map(
+		---@param diagnostic vim.Diagnostic
+		function(diagnostic)
+			return {
+				line = diagnostic.lnum + 1,
+				message = diagnostic.message,
+				severity = severity_map[diagnostic.severity],
+				source = diagnostic.source,
+			}
+		end):totable()
 end
 
 ---@param win number

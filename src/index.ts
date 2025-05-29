@@ -57,7 +57,7 @@ server.resource(
 				uri: "nvim://buffer",
 				mimeType: "text/plain",
 				name: "Current buffer",
-				description: "Get name and content of current buffer"
+				description: "Get name and content and diagnostics of current buffer"
 			}]
 		})
 	}),
@@ -65,6 +65,11 @@ server.resource(
 		const buf = vim.buffer
 		const bufname = await buf.name
 		const lines = await buf.lines
+		const getOption = await buf.getOption
+		const ft = await getOption("filetype")
+		const content = lines.map((line, i) => `${i+1} | ${line}`).join('\n')
+		const diagnostics = await nvim.getDiagnosticsFromBuf(0);
+		const diagnosticText = diagnostics.map(d => `**Line ${d.line}:**\n${d.severity}: ${d.message}. ${d.source ? `Source: ${d.source}` : ''}`).join('\n\n');
 		return {
 			contents: [{
 				uri: uri.href,
@@ -72,31 +77,15 @@ server.resource(
 >> Buffer name: ${bufname}
 
 >> Buffer content:
-${lines.join('\n')}
-			`
-			}]
-		}
-	}
-);
+\`\`\`${ft}
+${content}
+\`\`\`
 
-server.resource(
-	"current-buffer-diagnostics",
-	new ResourceTemplate("nvim://buffer-diagnostics", {
-		list: () => ({
-			resources: [{
-				uri: "nvim://buffer-diagnostics",
-				mimeType: "application/json",
-				name: "Current buffer diagnostics",
-				description: "Get diagnostics for current buffer"
-			}]
-		}),
-	}),
-	async (uri) => {
-		const diagnostics = await nvim.getDiagnosticsFromBuf(0);
-		return {
-			contents: [{
-				uri: uri.href,
-				text: JSON.stringify(diagnostics, null, 2)
+>> Buffer diagnostics:
+\`\`\`text
+${diagnosticText}
+\`\`\`
+			`
 			}]
 		}
 	}
@@ -140,23 +129,6 @@ server.tool("command-completion",
 				text: completion.join('\n')
 			}]
 		}
-	}
-)
-
-server.tool(
-	"get-diagnostics",
-	{
-		file: z.string().describe("File to get diagnostics for")
-	},
-	async ({ file }) => {
-		let result = await nvim.getDiagnosticsFromBuf(file);
-		result = JSON.stringify(result, null, 2);
-		return {
-			content: [{
-				type: "text",
-				text: String(result)
-			}]
-		};
 	}
 )
 

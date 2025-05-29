@@ -3,6 +3,13 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 
+interface Diagnostic {
+	message: string;
+	line: number;
+	severity: number;
+	source?: string;
+}
+
 const $NVIM = process.env.NVIM;
 if (!$NVIM) {
 	console.log('$NVIM environment variable is not set');
@@ -16,8 +23,11 @@ vim.lua(readFileSync(`${__dirname}/../../plugin/nvim-mcp-server.lua`, 'utf8'));
 
 export const nvim = vim;
 
-export const getDiagnosticsFromBuf = async (file: string|number): Promise<any> => {
-	return vim.lua("return NvimMcpServer.get_diagnostics_from_file(...)", [file]);
+/*
+ * TODO: Handle the case when the Lua function returns an error
+ */
+export const getDiagnosticsFromBuf = async (file: string|number): Promise<Diagnostic[]> => {
+	return vim.lua("return NvimMcpServer.get_diagnostics_from_file(...)", [file]) as Promise<Diagnostic[]>;
 }
 
 export const getWinText = async (win: number, lines?: number): Promise<any> => {
