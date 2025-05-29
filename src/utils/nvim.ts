@@ -35,3 +35,7 @@ export const execute = (cmd: string, silent: ''|'silent'|'silent!'): Promise<str
 export const confirm = (message: string): Promise<number> => {
 	return vim.call('confirm', [message, "&Yes\n&No"]);
 }
+
+export const executable = (cmd: string): Promise<number> => {
+	return vim.call('executable', [cmd]);
+}

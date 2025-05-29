@@ -39,6 +39,8 @@ import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mc
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import * as nvim from './utils/nvim.js';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
 const vim = nvim.nvim;
 
@@ -166,7 +168,7 @@ server.tool(
 		lines: z.number().describe("Number of document lines to return").optional(),
 	},
 	async ({ tag, lines }) => {
-		const error: string = await vim.call('execute', [`help ${tag}`, 'silent']);
+		const error: string = await nvim.execute(`help ${tag}`, 'silent');
 		if (error) {
 			return {
 				content: [{
@@ -201,46 +203,56 @@ server.tool(
 	}
 )
 
-server.tool(
-	"read-man-page",
-	{
-		name: z.string().describe("name of the man page. " +
-			"If you don't know the exact name, you can use tool `get-man-page-completion` to get a list of possible man pages matching a pattern"),
-	},
-	async ({ name }) => {
-		const error: string = await nvim.execute(`Man ${name}`, 'silent');
-		if (error) {
+if (await nvim.executable('man')) {
+	server.resource(
+		"man-page",
+		new ResourceTemplate("nvim://man/{name}", {
+			list: undefined
+		}),
+		async (uri, { name }) => {
+			try {
+				const { stdout, stderr } = await promisify(exec)(`man ${name}`);
+				if (stderr) {
+					return {
+						contents: [{
+							uri: uri.href,
+							text: stderr
+						}]
+					}
+				};
+				return {
+					contents: [{
+						uri: uri.href,
+						text: stdout
+					}]
+				}
+			} catch (error) {
+				return {
+					contents: [{
+						uri: uri.href,
+						text: `Failed to execute man command: ${error instanceof Error ? error.message : String(error)}`
+					}]
+				}
+			}
+		}
+	)
+
+	server.resource(
+		"man-search",
+		new ResourceTemplate("nvim://man-search/{pattern}", {
+			list: undefined
+		}),
+		async (uri, { pattern }) => {
+			const search = await nvim.getCompletion(`Man ${pattern}`, 'cmdline');
 			return {
-				content: [{
-					type: "text",
-					text: error
+				contents: [{
+					uri: uri.href,
+					text: search.join('\n')
 				}]
 			}
 		}
-		const lines = await vim.buffer.lines;
-		return {
-			content: [{
-				type: "text",
-				text: lines.join('\n')
-			}]
-		};
-	}
-)
-
-server.tool(
-	"get-man-page-completion",
-	{
-		name: z.string().describe("pattern to get man page completion"),
-	},
-	async ({ name }) => {
-		return {
-			content: [{
-				type: "text",
-				text: await nvim.getCompletion(`Man ${name}`, 'cmdline').then(res => res.join('\n'))
-			}]
-		};
-	}
-)
+	);
+}
 
 // Start receiving messages on stdin and sending messages on stdout
 const transport = new StdioServerTransport();
