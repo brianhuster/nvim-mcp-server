@@ -64,6 +64,7 @@ server.resource(
 	async (uri) => {
 		const buf = vim.buffer
 		const bufname = await buf.name
+		const bufnr = await buf.id
 		const lines = await buf.lines
 		const getOption = await buf.getOption
 		const ft = await getOption("filetype")
@@ -74,7 +75,9 @@ server.resource(
 			contents: [{
 				uri: uri.href,
 				text: `
->> Buffer name: ${bufname}
+>> Buffer information:
+Name: ${bufname}
+Number: ${bufnr}
 
 >> Buffer content:
 \`\`\`${ft}
@@ -90,6 +93,33 @@ ${diagnosticText}
 		}
 	}
 );
+
+server.resource(
+	"list-buffers",
+	new ResourceTemplate("nvim://list-buffers", {
+		list: () => ({
+			resources: [{
+				uri: "nvim://list-buffers",
+				mimeType: "text/plain",
+				name: "List of buffers",
+				description: "Get list of buffers. Each line is in the format of <buffer-id>: <buffer-name>"
+			}]
+		})
+	}),
+	async () => {
+		const bufs = await vim.buffers.then(bufs => bufs.filter(buf => buf.loaded))
+		const lines = await Promise.all(bufs.map(async buf => {
+			const name = await buf.name
+			return `${buf.id}: ${name}`
+		})).then(results => results.join('\n'))
+		return {
+			contents: [{
+				uri: "nvim://list-buffers",
+				text: lines
+			}]
+		}
+	}
+)
 
 server.tool("command",
 	{
