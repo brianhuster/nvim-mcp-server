@@ -49,25 +49,46 @@ const server = new McpServer({
 	version: "0.1.0"
 });
 
+/**
+ * Get a buffer handler by its number. Use 0 for current buffer.
+ */
+const getBufByNumber = async (buf_number: number) => {
+	if (buf_number === 0) {
+		return vim.buffer;
+	}
+	const buf = await vim.buffers.then(bufs => bufs.find(b => b.id === buf_number));
+	if (buf === undefined || await buf.name === undefined) {
+		return
+	}
+	return buf;
+}
+
 server.resource(
-	"current-buffer",
-	new ResourceTemplate("nvim://buffer", {
+	"get-buffer-content-and-diagnostics",
+	new ResourceTemplate("nvim://buffer/{buf_number}", {
 		list: () => ({
 			resources: [{
-				uri: "nvim://buffer",
+				uri: "nvim://buffer/0",
 				mimeType: "text/plain",
 				name: "Current buffer",
 				description: "Get name and content and diagnostics of current buffer"
 			}]
 		})
 	}),
-	async (uri) => {
-		const buf = vim.buffer
+	async (uri, { buf_number }) => {
+		const buf = await getBufByNumber(Number(buf_number));
+		if (buf === undefined) {
+			return {
+				contents: [{
+					uri: uri.href,
+					text: `Buffer ${buf_number} not found`
+				}]
+			};
+		}
 		const bufname = await buf.name
-		const bufnr = await buf.id
 		const lines = await buf.lines
-		const getOption = await buf.getOption
-		const ft = await getOption("filetype")
+		const bufnr = buf.id
+		const ft = await buf.getOption("filetype")
 		const content = lines.map((line, i) => `${i+1} | ${line}`).join('\n')
 		const diagnostics = await nvim.getDiagnosticsFromBuf(0);
 		const diagnosticText = diagnostics.map(d => `**Line ${d.line}:**\n${d.severity}: ${d.message}. ${d.source ? `Source: ${d.source}` : ''}`).join('\n\n');
