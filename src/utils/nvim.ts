@@ -49,3 +49,7 @@ export const confirm = (message: string): Promise<number> => {
 export const executable = (cmd: string): Promise<number> => {
 	return vim.call('executable', [cmd]);
 }
+
+export const getcwd = (): Promise<string> => {
+	return vim.call('getcwd');
+}

@@ -121,6 +121,53 @@ server.resource(
 	}
 )
 
+server.tool("find-file",
+	{
+		pattern: z.string().describe("Glob pattern to find files. For example, to find a file named `nvim.ts`, you can use `**/nvim.ts`")
+	},
+	async ({ pattern }) => {
+		const confirmation = await nvim.confirm(`Find files matching pattern: ${pattern}?`);
+		if (confirmation !== 1) { // User selected "No"
+			return {
+				content: [{
+					type: "text",
+					text: "Operation cancelled by user"
+				}]
+			};
+		}
+		const files = await nvim.getCompletion(`find ${pattern}`, 'cmdline');
+		return {
+			content: [{
+				type: "text",
+				text: files.join('\n')
+			}]
+		}
+	}
+)
+
+server.resource(
+	"current-working-directory",
+	new ResourceTemplate("nvim://cwd", {
+		list: () => ({
+			resources: [{
+				uri: "nvim://cwd",
+				mimeType: "text/plain",
+				name: "Current working directory",
+				description: "Get current working directory"
+			}]
+		})
+	}),
+	async () => {
+		const cwd = await nvim.getcwd();
+		return {
+			contents: [{
+				uri: "nvim://cwd",
+				text: cwd
+			}]
+		}
+	}
+)
+
 server.tool("command",
 	{
 		cmd: z.string().describe("Vimscript command to execute.\n" +
