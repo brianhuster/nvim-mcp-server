@@ -89,7 +89,7 @@ server.resource(
 		const lines = await buf.lines
 		const bufnr = buf.id
 		const ft = await buf.getOption("filetype")
-		const content = lines.map((line, i) => `${i+1} | ${line}`).join('\n')
+		const content = lines.map((line, i) => `${i + 1} | ${line}`).join('\n')
 		const diagnostics = await nvim.getDiagnosticsFromBuf(0);
 		const diagnosticText = diagnostics.map(d => `**Line ${d.line}:**\n${d.severity}: ${d.message}. ${d.source ? `Source: ${d.source}` : ''}`).join('\n\n');
 		return {
@@ -230,6 +230,34 @@ server.tool("command-completion",
 	}
 )
 
+server.tool("format-current-bufer", {}, async () => {
+	const confirmation = await nvim.confirm(`Format current buffer?`);
+	if (confirmation !== 1) { // User selected "No"
+		return {
+			content: [{
+				type: "text",
+				text: "Operation cancelled by user"
+			}]
+		};
+	}
+	const bufname = await vim.buffer.name;
+	const error = await nvim.execute(`normal! gggqG`, 'silent');
+	if (error) {
+		return {
+			content: [{
+				type: "text",
+				text: error
+			}]
+		}
+	}
+	return {
+		content: [{
+			type: "text",
+			text: `Formatted buffer ${bufname}`
+		}]
+	}
+})
+
 server.tool(
 	"get-help",
 	{
@@ -277,7 +305,7 @@ if (await nvim.executable('man')) {
 	server.resource(
 		"man-page",
 		new ResourceTemplate("nvim://man/{name}", {
-			list: undefined
+			list: undefined,
 		}),
 		async (uri, { name }) => {
 			try {
