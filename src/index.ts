@@ -64,58 +64,6 @@ const getBufByNumber = async (buf_number: number) => {
 }
 
 server.resource(
-	"get-buffer-content-and-diagnostics",
-	new ResourceTemplate("nvim://buffer/{buf_number}", {
-		list: () => ({
-			resources: [{
-				uri: "nvim://buffer/0",
-				mimeType: "text/plain",
-				name: "Current buffer",
-				description: "Get name and content and diagnostics of current buffer"
-			}]
-		})
-	}),
-	async (uri, { buf_number }) => {
-		const buf = await getBufByNumber(Number(buf_number));
-		if (buf === undefined) {
-			return {
-				contents: [{
-					uri: uri.href,
-					text: `Buffer ${buf_number} not found`
-				}]
-			};
-		}
-		const bufname = await buf.name
-		const lines = await buf.lines
-		const bufnr = buf.id
-		const ft = await buf.getOption("filetype")
-		const content = lines.map((line, i) => `${i + 1} | ${line}`).join('\n')
-		const diagnostics = await nvim.getDiagnosticsFromBuf(0);
-		const diagnosticText = diagnostics.map(d => `**Line ${d.line}:**\n${d.severity}: ${d.message}. ${d.source ? `Source: ${d.source}` : ''}`).join('\n\n');
-		return {
-			contents: [{
-				uri: uri.href,
-				text: `
->> Buffer information:
-Name: ${bufname}
-Number: ${bufnr}
-
->> Buffer content:
-\`\`\`${ft}
-${content}
-\`\`\`
-
->> Buffer diagnostics:
-\`\`\`text
-${diagnosticText}
-\`\`\`
-			`
-			}]
-		}
-	}
-);
-
-server.resource(
 	"list-buffers",
 	new ResourceTemplate("nvim://list-buffers", {
 		list: () => ({
@@ -137,6 +85,92 @@ server.resource(
 			contents: [{
 				uri: "nvim://list-buffers",
 				text: lines
+			}]
+		}
+	}
+)
+
+server.tool("get-buffer-content", {
+	buf_name: z.string().optional().describe("Name of the buffer to get content from. If not provided, the buffer number will be used"),
+	buf_number: z.number().optional().describe("Number of the buffer to get content from. If neither buf_name nor buf_number is provided, the current buffer will be used"),
+},
+	async ({ buf_name, buf_number }) => {
+		const name_or_number: "name"|"number" = buf_name !== undefined ? "name" : "number";
+		if (!buf_number) {
+			if (!buf_name) {
+				buf_number = 0;
+			}
+			else {
+				buf_number = await nvim.bufnr(buf_name, true);
+			}
+			if (buf_number < 0) {
+				return {
+					content: [{
+						type: "text",
+						text: `Buffer ${name_or_number === "name" ? buf_name : buf_number } not found`
+					}]
+				}
+			}
+		}
+		const buf = await getBufByNumber(buf_number);
+		if (buf === undefined) {
+			return {
+				content: [{
+					type: "text",
+					text: `Buffer ${name_or_number === "name" ? buf_name : buf_number } not found`
+				}]
+			}
+		}
+		buf_name = buf_name || await buf.name
+		const lines = await buf.lines
+		const bufnr = buf.id
+		const ft = await buf.getOption("filetype")
+		const content = lines.map((line, i) => `${i + 1} | ${line}`).join('\n')
+
+		return {
+			content: [{
+				type: "text",
+				text: `
+>> Buffer information:
+Name: ${buf_name}
+Number: ${bufnr}
+
+>> Buffer content:
+\`\`\`${ft}
+${content}
+\`\`\`
+`
+			}]
+		}
+	}
+)
+
+server.tool("get-buffer-diagnostics", {
+	buf_name: z.string().optional().describe("Name of the buffer to get content from. If not provided, the buffer number will be used"),
+	buf_number: z.number().optional().describe("Number of the buffer to get content from. If neither buf_name nor buf_number is provided, the current buffer will be used"),
+},
+	async ({ buf_name, buf_number }) => {
+		buf_number = buf_number ?? 0;
+		const bufid = buf_name ?? buf_number
+		if (!buf_name) {
+			buf_name = await nvim.bufGetName(buf_number);
+		}
+		const diagnostics = await nvim.getDiagnosticsFromBuf(bufid);
+		const diagnosticText = diagnostics.map(d =>
+`**Line ${d.line_number}:**
+Line content: ${d.line_content}
+Diagnostic ${d.severity.toLowerCase()}: ${d.message}. ${d.source ? `Source: ${d.source}` : ''}
+`).join('\n\n');
+
+		return {
+			content: [{
+				type: "text",
+				text: `
+>> Diagnostic in buffer "${buf_name}":
+\`\`\`text
+${diagnosticText}
+\`\`\`
+`
 			}]
 		}
 	}

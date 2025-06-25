@@ -5,8 +5,9 @@ import { dirname } from 'path';
 
 interface Diagnostic {
 	message: string;
-	line: number;
-	severity: number;
+	line_number: number;
+	line_content: string;
+	severity: "Error"|"Hint"|"Information"|"Warning";
 	source?: string;
 }
 
@@ -17,6 +18,12 @@ if (!$NVIM) {
 }
 
 const vim = attach({ socket: $NVIM });
+
+// import * as child_process from 'node:child_process';
+// const progpath = await vim.getVvar("progpath") as string;
+// const argv = await vim.getVvar("argv") as string[];
+// const vim2_proc = child_process.spawn(progpath, argv.slice(1), {});
+// const vim2 = attach({ proc: vim2_proc });
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 vim.lua(readFileSync(`${__dirname}/../../plugin/nvim-mcp-server.lua`, 'utf8'));
@@ -52,4 +59,12 @@ export const executable = (cmd: string): Promise<number> => {
 
 export const getcwd = (): Promise<string> => {
 	return vim.call('getcwd');
+}
+
+export const bufnr = (buf: number|string, create: boolean): Promise<number> => {
+	return vim.call('bufnr', [buf, create]);
+}
+
+export const bufGetName = (buf: number): Promise<string> => {
+	return vim.request('bufname', [buf]);
 }
