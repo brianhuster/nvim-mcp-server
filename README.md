@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/brianhuster-nvim-mcp-server-badge.png)](https://mseep.ai/app/brianhuster-nvim-mcp-server)
+
 # Neovim MCP Server
 
 A Model Context Protocol (MCP) server for Neovim that provides enhanced integration between language models and Neovim. This server enables AI language models to interact with Neovim, execute commands, read buffer contents, access Vim's help system, and more.
