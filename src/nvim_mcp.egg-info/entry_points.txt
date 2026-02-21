@@ -1,0 +1,2 @@
+[console_scripts]
+nvim-mcp = nvim_mcp.server:main

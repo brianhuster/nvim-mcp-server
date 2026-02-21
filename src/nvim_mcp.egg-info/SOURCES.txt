@@ -1,0 +1,12 @@
+LICENSE
+README.md
+pyproject.toml
+src/nvim_mcp/__init__.py
+src/nvim_mcp/server.py
+src/nvim_mcp/symbol_tools.py
+src/nvim_mcp.egg-info/PKG-INFO
+src/nvim_mcp.egg-info/SOURCES.txt
+src/nvim_mcp.egg-info/dependency_links.txt
+src/nvim_mcp.egg-info/entry_points.txt
+src/nvim_mcp.egg-info/requires.txt
+src/nvim_mcp.egg-info/top_level.txt
