@@ -171,6 +171,17 @@ def rename_symbol(name_path: str, relative_path: str, new_name: str) -> dict:
 
 
 @mcp.tool()
+def format(relative_path: str) -> dict:
+    """
+    Formats a file using the language server.
+
+    :param relative_path: the relative path to the file to format
+    :return: result summary indicating success or failure
+    """
+    return vim.lua.NvimMcpServer.format(relative_path)
+
+
+@mcp.tool()
 def restart_language_server() -> dict:
     """
     Restarts the LSP server. This may be necessary when edits not through MCP happen.
@@ -194,7 +205,8 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="nvim-mcp-server")
-    parser.add_argument("-v", "--version", action="store_true", help="Show version")
+    parser.add_argument("-v", "--version",
+                        action="store_true", help="Show version")
     args, _ = parser.parse_known_args()
 
     if args.version:
