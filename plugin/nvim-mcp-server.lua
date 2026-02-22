@@ -1,103 +1,10 @@
-if vim.g.NvimMcpServerLoaded then
+if NvimMcpServer then
 	return
 end
-vim.g.NvimMcpServerLoaded = true
 
 local M = {}
 local api, iter = vim.api, vim.iter
-local SUCCESS_RESULT = "OK"
 
----@class ParsedSymbol
----@field name string
----@field name_path string
----@field kind integer
----@field detail string|nil
----@field location {uri: string, range: any}|nil
----@field range {start: {line: integer, character: integer}, ["end"]: {line: integer, character: integer}}|nil
----@field children ParsedSymbol[]|nil
----@field relative_path string|nil
-
----@param symbols any[]
----@param result ParsedSymbol[]
----@param prefix string
----@return ParsedSymbol[]
-local function parse_symbol_tree(symbols, result, prefix)
-	prefix = prefix or ""
-	result = result or {}
-	if not symbols or #symbols == 0 then
-		return result
-	end
-	for _, symbol in ipairs(symbols) do
-		if symbol.name then
-			local name_path = prefix .. symbol.name
-
-			---@type {uri: string, range: any}|nil
-			local location = symbol.location
-			if not location then
-				location = { uri = symbol.uri, range = symbol.range }
-			end
-
-			---@type {start: {line: integer, character: integer}, ["end"]: {line: integer, character: integer}}|nil
-			local range = symbol.range
-			if not range and location then
-				range = location.range
-			end
-
-			---@type ParsedSymbol
-			local parsed = {
-				name = symbol.name,
-				name_path = name_path,
-				kind = symbol.kind,
-				detail = symbol.detail,
-				location = location,
-				range = range,
-				children = nil
-			}
-			table.insert(result, parsed)
-
-			if symbol.children and #symbol.children > 0 then
-				parsed.children = symbol.children
-				parse_symbol_tree(symbol.children, result, name_path .. "/")
-			end
-		end
-	end
-	return result
-end
-
----@param symbols ParsedSymbol[]
----@param name_path string
----@return ParsedSymbol|nil
-local function find_symbol_by_name_path(symbols, name_path)
-	---@type string[]
-	local parts = {}
-	for part in string.gmatch(name_path, "([^/]+)") do
-		table.insert(parts, part)
-	end
-
-	---@param syms ParsedSymbol[]|nil
-	---@param depth integer
-	---@return ParsedSymbol|nil
-	local function find_in_symbols(syms, depth)
-		if depth > #parts then
-			return nil
-		end
-		local target_name = parts[depth]
-		for _, sym in ipairs(syms or {}) do
-			if sym.name == target_name then
-				if depth == #parts then
-					return sym
-				elseif sym.children then
-					local children = sym.children
-					local found = find_in_symbols(children, depth + 1)
-					if found then return found end
-				end
-			end
-		end
-		return nil
-	end
-
-	return find_in_symbols(symbols, 1)
-end
 
 ---@type table<vim.diagnostic.Severity, string>
 local severity_map = {}
@@ -106,12 +13,18 @@ for k, v in pairs(vim.diagnostic.severity) do
 end
 
 ---@param path string
----@param lnum integer
----@param col integer
----@param end_lnum integer
----@param end_col integer
+---@param lnum integer 1-based
+---@param col integer 1-based
+---@param end_lnum integer? 1-based
+---@param end_col integer? 1-based
 ---@return string
 local function get_path_with_line_col(path, lnum, col, end_lnum, end_col)
+	if not end_lnum then
+		end_lnum = lnum
+	end
+	if not end_col then
+		end_col = col
+	end
 	if end_lnum > lnum then
 		return ("%s:%d.%d-%d:%d"):format(path, lnum + 1, col + 1, end_lnum + 1, end_col)
 	elseif end_col > col then
@@ -121,601 +34,147 @@ local function get_path_with_line_col(path, lnum, col, end_lnum, end_col)
 	end
 end
 
+---@param path string
+---@param load_buf boolean
+---@return number|string
+local function path_to_bufnr(path, load_buf)
+	local buf = vim.fn.bufnr(path)
+	if buf < 0 then
+		if vim.fn.filereadable(path) == 0 then
+			return "Error: File not found: " .. path
+		else
+			buf = vim.fn.bufadd(path)
+		end
+	end
+	if load_buf then
+		vim.fn.bufload(buf)
+	end
+	return buf
+end
+
 ---@param bufname string
 ---@return string
 function M.get_diagnostics(bufname)
 	local buf
-	if bufname ~= "" then
-		buf = vim.fn.bufnr(bufname)
-		if buf < 0 and vim.fn.filereadable(bufname) == 0 then
-			return "File not found: " .. bufname
-		end
-	end
+    if bufname ~= "" then
+        buf = path_to_bufnr(bufname, true)
+        if type(buf) == "string" then
+            return buf
+        end
+    end
+
+    ---@class mcpDiagnostic : vim.Diagnostic
+	---@field path string?
+
 	---@type vim.Diagnostic[]
 	local diagnostics = vim.diagnostic.get(buf)
-	return iter(diagnostics):map(
-		---@param d vim.Diagnostic
+	---@param d mcpDiagnostic
+	return iter(diagnostics):map(function(d)
+		local d_bufname = vim.api.nvim_buf_get_name(d.bufnr)
+		local path = vim.fs.relpath(vim.fn.getcwd(), d_bufname)
+		d.path = path
+		return d
+	end):filter(function(d) return d.path end):map(
 		function(d)
 			local lnum = d.lnum
-			local d_bufname = vim.api.nvim_buf_get_name(d.bufnr)
-			local path = vim.fs.relpath(vim.fn.getcwd(), d_bufname) or d_bufname
-			local path_with_lnum_col = get_path_with_line_col(path, lnum, d.col, d.end_lnum, d.end_col)
-			return ("%s [%s] %s\n%s"):format(
+			local path = d.path
+			local path_with_lnum_col = get_path_with_line_col(path, lnum + 1, d.col + 1, d.end_lnum + 1, d.end_col + 1)
+			return ("%s [%s] %s\n```%s\n%s\n```"):format(
 				path_with_lnum_col,
 				severity_map[d.severity],
-				d.message,
+                d.message,
+				vim.bo[d.bufnr].filetype,
 				iter(api.nvim_buf_get_lines(d.bufnr, lnum, d.end_lnum + 1, false)):join("\n")
 			)
-		end):join("\n")
-end
-
----@param bufnr integer
----@return any[]
-local function get_document_symbols(bufnr)
-	---@type {id: integer, name: string, server_capabilities: any, attached_buffers: table<integer, boolean>}[]
-	local clients = vim.lsp.get_clients({ bufnr = bufnr })
-	if #clients == 0 then
-		return {}
-	end
-
-	---@type {textDocument: {uri: string}}
-	local params = {
-		textDocument = {
-			uri = vim.uri_from_bufnr(bufnr)
-		}
-	}
-	local result = vim.lsp.buf_request_sync(bufnr, "textDocument/documentSymbol", params, 1000)
-	---@type any[]
-	local symbols = {}
-	for _, response in pairs(result or {}) do
-		if response and response.result then
-			for _, sym in ipairs(response.result) do
-				table.insert(symbols, sym)
-			end
-		end
-	end
-	return symbols
-end
-
---- Group symbols by kind
----@param symbols ParsedSymbol[]
----@return table<string, ParsedSymbol[]>
-local function group_by_kind(symbols)
-	---@type table<string, ParsedSymbol[]>
-	local groups = {}
-	for _, sym in ipairs(symbols) do
-		local kind_name = vim.lsp.protocol.SymbolKind[sym.kind] or "Unknown"
-		if not groups[kind_name] then
-			groups[kind_name] = {}
-		end
-		table.insert(groups[kind_name], sym)
-	end
-	return groups
-end
-
----Get content around a line in a buffer
----@param bufnr integer
----@param line integer
----@param context_before integer
----@param context_after integer
----@return string
-local function get_content_around_line(bufnr, line, context_before, context_after)
-	local lines = api.nvim_buf_get_lines(bufnr, line - context_before, line + context_after + 1, false)
-	return table.concat(lines, "\n")
-end
-
----@param relative_path string
----@param depth integer|nil
----@return table
-function M.get_symbols_overview(relative_path, depth)
-	depth = depth or 0
-	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
-	if vim.fn.filereadable(abs_path) == 0 then
-		return { error = "File not found: " .. relative_path }
-	end
-
-	local bufnr = vim.fn.bufadd(abs_path)
-	vim.fn.bufload(bufnr)
-	local symbols = get_document_symbols(bufnr)
-	if not symbols or #symbols == 0 then
-		return {}
-	end
-
-	local parsed = parse_symbol_tree(symbols, {}, "")
-
-	-- Filter and format like Serena: name=True, kind=True, no name_path, no location
-	-- Filter out low-level symbols (kind >= 13 = Variable and above)
-	---@type table[]
-	local filtered = {}
-	for _, sym in ipairs(parsed) do
-		-- Skip low-level symbols (Variable=13 and above)
-		if sym.kind and sym.kind >= 13 then
-		else
-			---@type table
-			local entry = {
-				name = sym.name,
-				kind = sym.kind
-			}
-			-- Add children if depth > 0
-			if depth > 0 and sym.children then
-				entry.children = sym.children
-			end
-			table.insert(filtered, entry)
-		end
-	end
-
-	-- Group by kind like Serena
-	local grouped = group_by_kind(filtered)
-	return grouped
-end
-
----@param name_path_pattern string
----@param relative_path string|nil
----@param depth integer|nil
----@param include_body boolean|nil
----@param include_info boolean|nil
----@param include_kinds integer[]|nil
----@param exclude_kinds integer[]|nil
----@param substring_matching boolean|nil
----@return table[]
-function M.find_symbol(name_path_pattern, relative_path, depth, include_body, include_info, include_kinds, exclude_kinds, substring_matching)
-	depth = depth or 0
-	include_body = include_body or false
-	include_info = include_info or false
-	substring_matching = substring_matching or false
-	local bufnr = nil
-
-	if relative_path and relative_path ~= "" then
-		local abs_path = vim.fn.fnamemodify(relative_path, ":p")
-		if vim.fn.filereadable(abs_path) == 1 then
-			bufnr = vim.fn.bufadd(abs_path)
-			vim.fn.bufload(bufnr)
-		end
-	end
-
-	if not bufnr then
-		bufnr = api.nvim_get_current_buf()
-	end
-
-	local symbols = get_document_symbols(bufnr)
-	if symbols and #symbols > 0 then
-		local parsed = parse_symbol_tree(symbols, {}, "")
-
-		local pattern = name_path_pattern:lower()
-		---@type table[]
-		local results = {}
-
-		---@param sym ParsedSymbol
-		---@return boolean
-		local function match_symbol(sym)
-			if substring_matching then
-				return sym.name:lower():find(pattern, 1, true) ~= nil
-			else
-				return sym.name:lower() == pattern
-			end
-		end
-
-		---@param syms ParsedSymbol[]|nil
-		local function collect_matches(syms)
-			for _, sym in ipairs(syms or {}) do
-				-- Filter by kind
-				local include = true
-				if include_kinds and #include_kinds > 0 then
-					include = false
-					for _, k in ipairs(include_kinds) do
-						if sym.kind == k then include = true break end
-					end
-				end
-				if include and exclude_kinds and #exclude_kinds > 0 then
-					for _, k in ipairs(exclude_kinds) do
-						if sym.kind == k then include = false break end
-					end
-				end
-
-				if include and match_symbol(sym) then
-					---@type table
-					local entry = {
-						name = sym.name,
-						name_path = sym.name_path,
-						kind = sym.kind,
-						relative_path = relative_path,
-						location = sym.location,
-						range = sym.range,
-						body_location = sym.range
-					}
-
-					-- Add body if requested
-					if include_body then
-						entry.body = "TODO: get body content"
-					end
-
-					-- Add children if depth > 0
-					if depth > 0 and sym.children then
-						entry.children = sym.children
-					end
-
-					table.insert(results, entry)
-				end
-
-				if sym.children and depth > 0 then
-					collect_matches(sym.children)
-				end
-			end
-		end
-
-		collect_matches(parsed)
-
-		-- Add info if requested (would need hover)
-		if include_info and not include_body and #results > 0 then
-			-- TODO: implement hover info
-		end
-
-		return results
-	end
-	return {}
-end
-
----@param name_path string
----@param relative_path string
----@param include_kinds integer[]|nil
----@param exclude_kinds integer[]|nil
----@return table
-function M.find_referencing_symbols(name_path, relative_path, include_kinds, exclude_kinds)
-	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
-	if vim.fn.filereadable(abs_path) == 0 then
-		return { error = "File not found: " .. relative_path }
-	end
-
-	local bufnr = vim.fn.bufadd(abs_path)
-	vim.fn.bufload(bufnr)
-
-	local symbols = get_document_symbols(bufnr)
-	if not symbols or #symbols == 0 then
-		return { error = "No symbols found in file" }
-	end
-
-	local parsed = parse_symbol_tree(symbols, {}, "")
-	local target_sym = find_symbol_by_name_path(parsed, name_path)
-
-	if not target_sym then
-		return { error = "Symbol not found: " .. name_path }
-	end
-
-	local range = target_sym.range or target_sym.location.range
-
-	local params = {
-		textDocument = {
-			uri = vim.uri_from_bufnr(bufnr)
-		},
-		position = {
-			line = range.start.line,
-			character = range.start.character
-		},
-		context = {
-			includeDeclaration = false
-		}
-	}
-
-	local results = vim.lsp.buf_request_sync(bufnr, "textDocument/references", params, 1000)
-
-	---@type table[]
-	local refs = {}
-	for _, resp in pairs(results or {}) do
-		if resp and resp.result then
-			for _, ref in ipairs(resp.result) do
-				local ref_uri = ref.uri or ref.location.uri
-				local ref_range = ref.range or ref.location.range
-				-- Convert uri to relative path
-				local ref_bufnr = vim.uri_to_bufnr(ref_uri)
-				local ref_abs_path = api.nvim_buf_get_name(ref_bufnr)
-				local ref_rel_path = vim.fs.relpath(vim.fn.getcwd(), ref_abs_path) or ref_abs_path
-
-				-- Get content around reference
-				local ref_line = ref_range.start.line
-				local content = get_content_around_line(ref_bufnr, ref_line, 1, 1)
-
-				---@type table
-				local ref_sym = {
-					relative_path = ref_rel_path,
-					location = { uri = ref_uri, range = ref_range },
-					body_location = ref_range,
-					content_around_reference = content
-				}
-
-				-- Try to get symbol info at that location
-				local ref_syms = get_document_symbols(ref_bufnr)
-				if ref_syms and #ref_syms > 0 then
-					local ref_parsed = parse_symbol_tree(ref_syms, {}, "")
-					-- Find symbol at the reference position
-					for _, s in ipairs(ref_parsed) do
-						if s.range and s.range.start.line == ref_line then
-							ref_sym.name = s.name
-							ref_sym.name_path = s.name_path
-							ref_sym.kind = s.kind
-							ref_sym.detail = s.detail
-							break
-						end
-					end
-				end
-
-				-- Filter by kind
-				local skip = false
-				if include_kinds and #include_kinds > 0 then
-					skip = true
-					for _, k in ipairs(include_kinds) do
-						if ref_sym.kind == k then skip = false break end
-					end
-				end
-				if not skip and exclude_kinds and #exclude_kinds > 0 then
-					for _, k in ipairs(exclude_kinds) do
-						if ref_sym.kind == k then skip = true break end
-					end
-				end
-
-				if not skip then
-					table.insert(refs, ref_sym)
-				end
-			end
-		end
-	end
-
-	-- Group by relative_path and kind like Serena
-	---@type table<string, table<string, table[]>>
-	local grouped = {}
-	for _, ref in ipairs(refs) do
-		local rel_path = ref.relative_path or "unknown"
-		local kind_name = ref.kind and vim.lsp.protocol.SymbolKind[ref.kind] or "Unknown"
-		if not grouped[rel_path] then
-			grouped[rel_path] = {}
-		end
-		if not grouped[rel_path][kind_name] then
-			grouped[rel_path][kind_name] = {}
-		end
-		table.insert(grouped[rel_path][kind_name], ref)
-	end
-
-	return grouped
-end
-
----@param name_path string
----@param relative_path string
----@param body string
----@return string|table
-function M.replace_symbol_body(name_path, relative_path, body)
-	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
-	if vim.fn.filereadable(abs_path) == 0 then
-		return { error = "File not found: " .. relative_path }
-	end
-
-	local bufnr = vim.fn.bufadd(abs_path)
-	vim.fn.bufload(bufnr)
-
-	local symbols = get_document_symbols(bufnr)
-	if not symbols or #symbols == 0 then
-		return { error = "No symbols found in file" }
-	end
-
-	local parsed = parse_symbol_tree(symbols, {}, "")
-	local target_sym = find_symbol_by_name_path(parsed, name_path)
-
-	if not target_sym then
-		return { error = "Symbol not found: " .. name_path }
-	end
-
-	local range = target_sym.range or target_sym.location.range
-
-	---@type any
-	local text_edit = {
-		range = range,
-		newText = body
-	}
-
-	vim.lsp.util.apply_text_edits({ text_edit }, bufnr, "utf-8")
-
-	return SUCCESS_RESULT
-end
-
----@param name_path string
----@param relative_path string
----@param body string
----@return string|table
-function M.insert_after_symbol(name_path, relative_path, body)
-	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
-	if vim.fn.filereadable(abs_path) == 0 then
-		return { error = "File not found: " .. relative_path }
-	end
-
-	local bufnr = vim.fn.bufadd(abs_path)
-	vim.fn.bufload(bufnr)
-
-	local symbols = get_document_symbols(bufnr)
-	if not symbols or #symbols == 0 then
-		return { error = "No symbols found in file" }
-	end
-
-	local parsed = parse_symbol_tree(symbols, {}, "")
-	local target_sym = find_symbol_by_name_path(parsed, name_path)
-
-	if not target_sym then
-		return { error = "Symbol not found: " .. name_path }
-	end
-
-	local range = target_sym.range or target_sym.location.range
-
-	local insert_line = range["end"].line
-	local insert_char = range["end"].character
-
-	local new_text = "\n" .. body .. "\n"
-
-	---@type any
-	local text_edit = {
-		range = {
-			start = { line = insert_line, character = insert_char },
-			["end"] = { line = insert_line, character = insert_char }
-		},
-		newText = new_text
-	}
-
-	vim.lsp.util.apply_text_edits({ text_edit }, bufnr, "utf-8")
-
-	return SUCCESS_RESULT
-end
-
----@param name_path string
----@param relative_path string
----@param body string
----@return string|table
-function M.insert_before_symbol(name_path, relative_path, body)
-	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
-	if vim.fn.filereadable(abs_path) == 0 then
-		return { error = "File not found: " .. relative_path }
-	end
-
-	local bufnr = vim.fn.bufadd(abs_path)
-	vim.fn.bufload(bufnr)
-
-	local symbols = get_document_symbols(bufnr)
-	if not symbols or #symbols == 0 then
-		return { error = "No symbols found in file" }
-	end
-
-	local parsed = parse_symbol_tree(symbols, {}, "")
-	local target_sym = find_symbol_by_name_path(parsed, name_path)
-
-	if not target_sym then
-		return { error = "Symbol not found: " .. name_path }
-	end
-
-	local range = target_sym.range or target_sym.location.range
-
-	local insert_line = range.start.line
-	local insert_char = 0
-
-	local new_text = body .. "\n"
-
-	---@type any
-	local text_edit = {
-		range = {
-			start = { line = insert_line, character = insert_char },
-			["end"] = { line = insert_line, character = insert_char }
-		},
-		newText = new_text
-	}
-
-	vim.lsp.util.apply_text_edits({ text_edit }, bufnr, "utf-8")
-
-	return SUCCESS_RESULT
-end
-
----@param name_path string
----@param relative_path string
----@param new_name string
----@return string|table
-function M.rename_symbol(name_path, relative_path, new_name)
-	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
-	if vim.fn.filereadable(abs_path) == 0 then
-		return { error = "File not found: " .. relative_path }
-	end
-
-	local bufnr = vim.fn.bufadd(abs_path)
-	vim.fn.bufload(bufnr)
-
-	local symbols = get_document_symbols(bufnr)
-	if not symbols or #symbols == 0 then
-		return { error = "No symbols found in file" }
-	end
-
-	local parsed = parse_symbol_tree(symbols, {}, "")
-	local target_sym = find_symbol_by_name_path(parsed, name_path)
-
-	if not target_sym then
-		return { error = "Symbol not found: " .. name_path }
-	end
-
-	local range = target_sym.range or target_sym.location.range
-
-	local params = {
-		textDocument = {
-			uri = vim.uri_from_bufnr(bufnr)
-		},
-		position = {
-			line = range.start.line,
-			character = range.start.character
-		},
-		newName = new_name
-	}
-
-	local result = vim.lsp.buf_request_sync(bufnr, "textDocument/rename", params, 2000)
-
-	local success = false
-	local changes_count = 0
-
-	for _, resp in pairs(result or {}) do
-		if resp and resp.result then
-			if resp.result.changes then
-				vim.lsp.util.apply_workspace_edit(resp.result, "utf-8")
-				for _, _ in pairs(resp.result.changes) do
-					changes_count = changes_count + 1
-				end
-				success = true
-			elseif resp.result.documentChanges then
-				vim.lsp.util.apply_workspace_edit(resp.result, "utf-8")
-				changes_count = #resp.result.documentChanges
-				success = true
-			end
-		end
-	end
-
-	if success then
-		return SUCCESS_RESULT
-	else
-		return { error = "Rename failed - language server may not support rename" }
-	end
+		end):join("\n\n")
 end
 
 ---@param relative_path string
 ---@return table
 function M.format(relative_path)
-	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
-	if vim.fn.filereadable(abs_path) == 0 then
-		return { error = "File not found: " .. relative_path }
+	local bufnr = path_to_bufnr(relative_path, true)
+	if type(bufnr) == "string" then
+		return {
+			error = bufnr,
+		}
 	end
-	local bufnr = vim.fn.bufadd(abs_path)
-    vim.fn.bufload(bufnr)
 	local prev_lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    vim.lsp.buf.format({ bufnr = bufnr })
-    local new_lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    local diff = vim.text.diff(
+	vim.lsp.buf.format({ bufnr = bufnr })
+	local new_lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	local diff = vim.text.diff(
 		table.concat(prev_lines, "\n") .. "\n",
-        table.concat(new_lines, "\n") .. "\n"
-    )
-    return {
+		table.concat(new_lines, "\n") .. "\n"
+	)
+	return {
 		message = "Format applied successfully",
 		changes = diff
 	}
 end
 
----@return string|table
-function M.restart_language_server()
-	local clients = vim.lsp.get_clients()
-	local count = 0
-	for _, client in ipairs(clients) do
-		client:stop()
-		count = count + 1
+---@param bufnr number?
+---@param callback fun(f: fun(qf_what: vim.lsp.LocationOpts.OnList))
+---@return vim.quickfix.entry[]
+local function get_lsp_items(bufnr, callback)
+	local result ---@type vim.quickfix.entry[]
+	---@param qf_what vim.lsp.LocationOpts.OnList
+	local function on_list(qf_what)
+		result = qf_what.items
 	end
-
-	vim.defer_fn(function()
-		vim.cmd("LspRestart")
-	end, 100)
-
-	return SUCCESS_RESULT
+	if bufnr then
+		api.nvim_buf_call(bufnr, function()
+			callback(on_list)
+		end)
+	else
+		callback(on_list)
+	end
+	vim.wait(1000, function()
+		return not not result
+	end, 10)
+	return result
 end
 
----@return table
-function M.get_lsp_client_info()
-	---@type {id: integer, name: string, server_capabilities: any, attached_buffers: table<integer, boolean>}[]
-	local clients = vim.lsp.get_clients()
-	return { clients = clients, count = #clients }
+---@param items vim.quickfix.entry[]
+---@return string
+local function qf_items_to_string(items)
+	local type_map = {
+		E = "[ERROR] ",
+		W = "[WARNING] ",
+		N = "[NOTE] ",
+	}
+	---@param i vim.quickfix.entry
+	return iter(items):map(function(i)
+		local path = get_path_with_line_col(i.filename, i.lnum, i.col, i.end_lnum, i.end_col)
+		local text = (type_map[i.type] or "") .. i.text
+		return ("%s: %s"):format(path, text)
+	end):join("\n")
+end
+
+---@param query string
+---@param include_external boolean?
+---@return string
+function M.get_workspace_symbols(query, include_external)
+	local items = get_lsp_items(nil, function(on_list)
+		vim.lsp.buf.workspace_symbol(query, { on_list = on_list })
+    end)
+    if not include_external then
+		---@param i vim.quickfix.entry
+		items = iter(items):filter(function(i)
+			return not not vim.fs.relpath(vim.fn.getcwd(), i.filename)
+		end):totable()
+	end
+	return qf_items_to_string(items)
+end
+
+---@param relative_path string
+function M.get_document_symbols(relative_path)
+	local bufnr = path_to_bufnr(relative_path, true)
+	if type(bufnr) == "string" then
+		return bufnr
+	end
+	local items = get_lsp_items(bufnr, function(on_list)
+		vim.lsp.buf.document_symbol({ on_list = on_list })
+	end)
+	return qf_items_to_string(items)
 end
 
 NvimMcpServer = M

@@ -12,7 +12,12 @@ vim = attach("socket", path=NVIM)
 
 mcp = FastMCP(
     name="nvim-mcp-server",
-    instructions="This is an MCP that allows you to control a Nvim instance",
+    instructions="""
+    If you see this MCP server, it means your user is using Neovim. You can use
+    tools provided by this server to interact with the Neovim instance the user
+    is using. This server also provides tools to use some language server
+    protocol features, such as getting diagnostics and symbols, formatting code
+    """,
 )
 
 
@@ -21,6 +26,7 @@ PLUGIN_PATH = os.path.join(
     "plugin",
     "nvim-mcp-server.lua",
 )
+print(PLUGIN_PATH)
 
 vim.command(f"luafile {PLUGIN_PATH}")
 
@@ -28,7 +34,7 @@ vim.command(f"luafile {PLUGIN_PATH}")
 @mcp.tool()
 def execute_vimscript(code: str) -> str:
     """
-    Execute Vimscript code and return the output.
+    Execute Vimscript code in the Neovim instance and return the output.
 
     :param command: Vimscript code to execute
     """
@@ -45,10 +51,10 @@ def execute_lua(code: str) -> str:
     Executes Lua code. Arguments are available as `...` inside the chunk. The
     chunk can return a value.
 
-    Only statements are executed. To evaluate an expression, prefix it with
-    "return": `return my_function(...)`
+    Only statements are executed.
 
-    :param code: The Lua code to execute (use 'return' to return a value)
+    :param code: The Lua code to execute. To evaluate an expression, prefix it
+    with "return": `return my_function(...)`
     """
     try:
         result = vim.exec_lua(code)
@@ -64,171 +70,53 @@ def get_diagnostics(relative_path: str = "") -> str:
     """
     Get diagnostics for a given file or all opening files in Nvim.
 
-    Use this tool to get information about errors, warnings, and other diagnostics reported by the language server.
-    This should be called after performing edits to check for any new issues or to verify that existing issues have been resolved.
+    Use this tool to get information about errors, warnings, and other
+    diagnostics reported by the language server. This should be called after
+    performing edits to check for any new issues or to verify that existing
+    issues have been resolved.
 
-    :param relative_path: Optional. The relative path to the file to get diagnostics for. If not provided, diagnostics for all open files will be returned.
+    :param relative_path: Optional. The relative path to the file to get
+    diagnostics for. If not provided, diagnostics for all open files will be
+    returned.
     """
     try:
         return vim.lua.NvimMcpServer.get_diagnostics(relative_path)
     except Exception as e:
-        return f"Error: {type(e).__name__}: {e}"
+        return f"INTERNAL ERROR: {type(e).__name__}: {e}"
 
 
 @mcp.tool()
-def get_symbols_overview(relative_path: str, depth: int = 0) -> list | str:
+def get_document_symbols(relative_path) -> str:
     """
-    Gets an overview of the top-level symbols defined in a given file.
-
-    Use this tool to get a high-level understanding of the code symbols in a file.
-    This should be the first tool to call when you want to understand a new file.
+    Use this tool to get a high-level understanding of the code symbols in a
+    file. This should be the first tool to call when you want to understand a
+    new file, unless you already know what you are looking for.
 
     :param relative_path: the relative path to the file to get the overview of
-    :param depth: depth up to which descendants of top-level symbols shall be retrieved
-        (e.g. 1 retrieves immediate children). Default 0.
-    :return: a dict containing symbols.
     """
-    return vim.lua.NvimMcpServer.get_symbols_overview(relative_path, depth)
+    try:
+        return vim.lua.NvimMcpServer.get_document_symbols(relative_path)
+    except Exception as e:
+        return f"INTERNAL ERROR: {type(e).__name__}: {e}"
 
 
 @mcp.tool()
-def find_symbol(
-    name_path_pattern: str,
-    relative_path: str = "",
-    depth: int = 0,
-    include_body: bool = False,
-    include_info: bool = False,
-    include_kinds: list[int] | None = None,
-    exclude_kinds: list[int] | None = None,
-    substring_matching: bool = False,
-) -> dict | str:
+def get_workspace_symbols(query: str, include_external: bool) -> str:
     """
-    Performs a global (or local) search for symbols using the language server.
+    Use this tool to search for symbols across the entire workspace. This is
+    useful when you are learning about the overall structure of the codebase or
+    when you are looking for a specific symbol but don't know where it is
+    defined.
 
-    :param name_path_pattern: the name path matching pattern (e.g. "MyClass/my_method")
-    :param relative_path: Optional. Restrict search to this file or directory.
-    :param depth: depth up to which descendants shall be retrieved. Default 0.
-    :param include_body: whether to include the symbol's source code.
-    :param include_info: whether to include additional info (hover-like).
-    :param include_kinds: List of LSP symbol kind integers to include.
-    :param exclude_kinds: List of LSP symbol kind integers to exclude.
-    :param substring_matching: If True, use substring matching.
-    :return: a list with symbols matching the name.
+    :param query: the query string to search for in the workspace symbols. If
+    no query is provided, all symbols in the workspace will be returned.
+    :param include_external: optional boolean to include symbols from libraries
+    outside the current working directory. Defaults to false.
     """
-    return vim.lua.NvimMcpServer.find_symbol(
-        name_path_pattern,
-        relative_path,
-        depth,
-        include_body,
-        include_info,
-        include_kinds,
-        exclude_kinds,
-        substring_matching,
-    )
-
-
-@mcp.tool()
-def find_referencing_symbols(
-    name_path: str,
-    relative_path: str,
-    include_kinds: list[int] | None = None,
-    exclude_kinds: list[int] | None = None,
-) -> dict | str:
-    """
-    Finds symbols that reference the given symbol.
-
-    :param name_path: the name path of the symbol to find references for (e.g. "MyClass/my_method")
-    :param relative_path: the relative path to the file containing the symbol
-    :param include_kinds: List of LSP symbol kind integers to include.
-    :param exclude_kinds: List of LSP symbol kind integers to exclude.
-    :return: a dict with the symbols referencing the requested symbol
-    """
-    return vim.lua.NvimMcpServer.find_referencing_symbols(
-        name_path, relative_path, include_kinds, exclude_kinds
-    )
-
-
-@mcp.tool()
-def replace_symbol_body(name_path: str, relative_path: str, body: str) -> dict | str:
-    """
-    Replaces the full definition of a symbol.
-
-    :param name_path: the name path of the symbol to replace (e.g. "MyClass/my_method")
-    :param relative_path: the relative path to the file containing the symbol
-    :param body: the new symbol body (the definition including the signature line)
-    :return: result summary indicating success or failure
-    """
-    return vim.lua.NvimMcpServer.replace_symbol_body(name_path, relative_path, body)
-
-
-@mcp.tool()
-def insert_after_symbol(name_path: str, relative_path: str, body: str) -> dict | str:
-    """
-    Inserts content after the end of the definition of a given symbol.
-
-    :param name_path: name path of the symbol after which to insert content
-    :param relative_path: the relative path to the file containing the symbol
-    :param body: the body/content to be inserted
-    :return: result summary indicating success or failure
-    """
-    return vim.lua.NvimMcpServer.insert_after_symbol(name_path, relative_path, body)
-
-
-@mcp.tool()
-def insert_before_symbol(name_path: str, relative_path: str, body: str) -> dict | str:
-    """
-    Inserts content before the beginning of the definition of a given symbol.
-
-    :param name_path: name path of the symbol before which to insert content
-    :param relative_path: the relative path to the file containing the symbol
-    :param body: the body/content to be inserted
-    :return: result summary indicating success or failure
-    """
-    return vim.lua.NvimMcpServer.insert_before_symbol(name_path, relative_path, body)
-
-
-@mcp.tool()
-def rename_symbol(name_path: str, relative_path: str, new_name: str) -> dict | str:
-    """
-    Renames a symbol throughout the codebase using language server refactoring.
-
-    :param name_path: name path of the symbol to rename (e.g. "MyClass/my_method")
-    :param relative_path: the relative path to the file containing the symbol
-    :param new_name: the new name for the symbol
-    :return: result summary indicating success or failure
-    """
-    return vim.lua.NvimMcpServer.rename_symbol(name_path, relative_path, new_name)
-
-
-@mcp.tool()
-def format(relative_path: str) -> dict | str:
-    """
-    Formats a file using the language server.
-
-    :param relative_path: the relative path to the file to format
-    :return: result summary indicating success or failure
-    """
-    return vim.lua.NvimMcpServer.format(relative_path)
-
-
-@mcp.tool()
-def restart_language_server() -> dict | str:
-    """
-    Restarts the LSP server. This may be necessary when edits not through MCP happen.
-
-    :return: result summary indicating success or failure
-    """
-    return vim.lua.NvimMcpServer.restart_language_server()
-
-
-@mcp.tool()
-def get_lsp_client_info() -> dict | str:
-    """
-    Get information about the active LSP clients.
-
-    :return: a dict containing information about active LSP clients
-    """
-    return vim.lua.NvimMcpServer.get_lsp_client_info()
+    try:
+        return vim.lua.NvimMcpServer.get_workspace_symbols(query)
+    except Exception as e:
+        return f"INTERNAL ERROR: {type(e).__name__}: {e}"
 
 
 def main() -> None:
