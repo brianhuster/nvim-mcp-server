@@ -8,15 +8,20 @@ A Model Context Protocol (MCP) server for Neovim that provides LSP-based symbol 
 
 ### Symbol Tools (LSP-based)
 
-- `get_symbols_overview` - Get overview of symbols in a file
-- `find_symbol` - Find symbols by name path pattern
-- `find_referencing_symbols` - Find references to a symbol
-- `replace_symbol_body` - Replace the body of a symbol
-- `insert_after_symbol` - Insert content after a symbol
-- `insert_before_symbol` - Insert content before a symbol
-- `rename_symbol` - Rename a symbol throughout the codebase
-- `restart_language_server` - Restart the LSP server
-- `get_lsp_client_info` - Get information about the active LSP client
+- `get_symbols_overview(relative_path, depth)` - Get overview of top-level symbols in a file. Use `depth` to include children (e.g., methods of a class).
+- `find_symbol(name_path_pattern, relative_path, depth)` - Find symbols by name path pattern (e.g., "MyClass/my_method").
+- `find_referencing_symbols(name_path, relative_path)` - Find all references to a symbol.
+- `replace_symbol_body(name_path, relative_path, body)` - Replace the body of a symbol definition.
+- `insert_after_symbol(name_path, relative_path, body)` - Insert content after a symbol's definition.
+- `insert_before_symbol(name_path, relative_path, body)` - Insert content before a symbol's definition.
+- `rename_symbol(name_path, relative_path, new_name)` - Rename a symbol throughout the codebase.
+- `restart_language_server()` - Restart the LSP server (useful when LSP hangs).
+- `get_lsp_client_info()` - Get information about active LSP clients.
+
+### General Tools
+
+- `execute_lua(code)` - Execute Lua code in Neovim
+- `execute_vimscript(code)` - Execute Vimscript code in Neovim
 
 ## Installation
 

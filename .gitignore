@@ -26,5 +26,6 @@ yarn-error.log*
 
 neovim
 zod
-serena
 *cache*
+serena
+doc
