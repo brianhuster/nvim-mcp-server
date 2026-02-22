@@ -1,7 +1,7 @@
-if vim.g.NvimMcpServerLoaded then
-    return
-end
-vim.g.NvimMcpServerLoaded = true
+-- if vim.g.NvimMcpServerLoaded then
+--     return
+-- end
+-- vim.g.NvimMcpServerLoaded = true
 
 local M = {}
 local api, iter = vim.api, vim.iter
@@ -22,31 +22,37 @@ local api, iter = vim.api, vim.iter
 local function parse_symbol_tree(symbols, result, prefix)
     prefix = prefix or ""
     result = result or {}
-    for _, symbol in ipairs(symbols or {}) do
-        local name_path = prefix .. symbol.name
-        
-        -- Handle both DocumentSymbol (hierarchical) and SymbolInformation (flat)
-        -- DocumentSymbol: has range, children
-        -- SymbolInformation: has location (with uri and range)
-        local location = symbol.location or { uri = symbol.uri, range = symbol.range }
-        local range = symbol.range or (location and location.range)
-        
-        table.insert(result, {
-            name = symbol.name,
-            name_path = name_path,
-            kind = symbol.kind,
-            detail = symbol.detail,
-            location = location,
-            range = range,
-            children = symbol.children
-        })
-        if symbol.children then
-            parse_symbol_tree(symbol.children, result, name_path .. "/")
+    if not symbols or #symbols == 0 then
+        return result
+    end
+    for _, symbol in ipairs(symbols) do
+        if symbol.name then
+            local name_path = prefix .. symbol.name
+            
+            -- Handle both DocumentSymbol (hierarchical) and SymbolInformation (flat)
+            -- DocumentSymbol: has range, children
+            -- SymbolInformation: has location (with uri and range)
+            local location = symbol.location or { uri = symbol.uri, range = symbol.range }
+            local range = symbol.range or (location and location.range)
+            
+            table.insert(result, {
+                name = symbol.name,
+                name_path = name_path,
+                kind = symbol.kind,
+                detail = symbol.detail,
+                location = location,
+                range = range,
+                children = symbol.children
+            })
+            if symbol.children and #symbol.children > 0 then
+                parse_symbol_tree(symbol.children, result, name_path .. "/")
+            end
         end
     end
     return result
 end
 
+---@return {id: integer, name: string, server_capabilities: any, attached_buffers: table<integer, boolean>}[]
 local function get_lsp_clients()
     local clients = vim.lsp.get_clients()
     local result = {}
@@ -138,12 +144,24 @@ function M.get_diagnostics(bufname)
         end):join("\n\n")
 end
 
-local function get_document_symbols()
-    local params = vim.lsp.util.make_text_document_params()
-    local result = vim.lsp.buf_request_sync(0, "textDocument/documentSymbol", params, 1000)
+---@param bufnr integer
+local function get_document_symbols(bufnr)
+    -- Check if LSP is attached
+    local clients = vim.lsp.get_clients({ bufnr = bufnr })
+    if #clients == 0 then
+        return {}
+    end
+    
+    -- Correct LSP params format: { textDocument: { uri: string } }
+    local params = {
+        textDocument = {
+            uri = vim.uri_from_bufnr(bufnr)
+        }
+    }
+    local result = vim.lsp.buf_request_sync(bufnr, "textDocument/documentSymbol", params, 1000)
     local symbols = {}
     for _, response in pairs(result or {}) do
-        if response.result then
+        if response and response.result then
             for _, sym in ipairs(response.result) do
                 table.insert(symbols, sym)
             end
@@ -159,26 +177,31 @@ function M.get_symbols_overview(relative_path, depth)
         return {error = "File not found: " .. relative_path}
     end
 
-    vim.cmd("edit " .. abs_path)
-    local symbols = get_document_symbols()
-    if symbols and #symbols > 0 then
-        local parsed = parse_symbol_tree(symbols, {}, "")
-        return {symbols = parsed}
-    end
-    return {message = "No symbols found in file", symbols = {}}
+    -- Add buffer without switching to it
+    local bufnr = vim.fn.bufadd(abs_path)
+    vim.fn.bufload(bufnr)
+    local symbols = get_document_symbols(bufnr)
+    local parsed = parse_symbol_tree(symbols, {}, "")
+    return parsed
 end
 
 function M.find_symbol(name_path_pattern, relative_path, depth)
     depth = depth or 0
+    local bufnr = nil
 
     if relative_path and relative_path ~= "" then
         local abs_path = vim.fn.fnamemodify(relative_path, ":p")
         if vim.fn.filereadable(abs_path) == 1 then
-            vim.cmd("edit " .. abs_path)
+            bufnr = vim.fn.bufadd(abs_path)
+            vim.fn.bufload(bufnr)
         end
     end
 
-    local symbols = get_document_symbols()
+    if not bufnr then
+        bufnr = vim.api.nvim_get_current_buf()
+    end
+
+    local symbols = get_document_symbols(bufnr)
     if symbols and #symbols > 0 then
         local parsed = parse_symbol_tree(symbols, {}, "")
 
@@ -203,11 +226,9 @@ function M.find_symbol(name_path_pattern, relative_path, depth)
 
         collect_matches(parsed)
 
-        if #results > 0 then
-            return {symbols = results}
-        end
+        return results
     end
-    return {message = "No symbols found matching: " .. name_path_pattern, symbols = {}}
+    return {}
 end
 
 function M.find_referencing_symbols(name_path, relative_path)
@@ -216,9 +237,10 @@ function M.find_referencing_symbols(name_path, relative_path)
         return {error = "File not found: " .. relative_path}
     end
 
-    vim.cmd("edit " .. abs_path)
+    local bufnr = vim.fn.bufadd(abs_path)
+    vim.fn.bufload(bufnr)
 
-    local symbols = get_document_symbols()
+    local symbols = get_document_symbols(bufnr)
     if not symbols or #symbols == 0 then
         return {error = "No symbols found in file"}
     end
@@ -231,19 +253,22 @@ function M.find_referencing_symbols(name_path, relative_path)
     end
 
     local range = target_sym.range or target_sym.location.range
+    bufnr = vim.api.nvim_get_current_buf()
     local params = {
-        textDocument = vim.lsp.util.make_text_document_params(),
+        textDocument = {
+            uri = vim.uri_from_bufnr(bufnr)
+        },
         position = {
             line = range.start.line,
             character = range.start.character
         }
     }
 
-    local results = vim.lsp.buf.request_sync("textDocument/references", params, 1000)
+    local results = vim.lsp.buf_request_sync(bufnr, "textDocument/references", params)
 
     local refs = {}
-    for client_id, resp in pairs(results or {}) do
-        if resp.result then
+    for _, resp in pairs(results or {}) do
+        if resp and resp.result then
             for _, ref in ipairs(resp.result) do
                 table.insert(refs, {
                     uri = ref.uri,
@@ -253,10 +278,7 @@ function M.find_referencing_symbols(name_path, relative_path)
         end
     end
 
-    if #refs == 0 then
-        return {message = "No references found", references = {}}
-    end
-    return {references = refs, symbol_name = name_path}
+    return refs
 end
 
 function M.replace_symbol_body(name_path, relative_path, body)
@@ -265,9 +287,10 @@ function M.replace_symbol_body(name_path, relative_path, body)
         return {error = "File not found: " .. relative_path}
     end
 
-    vim.cmd("edit " .. abs_path)
+    local bufnr = vim.fn.bufadd(abs_path)
+    vim.fn.bufload(bufnr)
 
-    local symbols = get_document_symbols()
+    local symbols = get_document_symbols(bufnr)
     if not symbols or #symbols == 0 then
         return {error = "No symbols found in file"}
     end
@@ -298,9 +321,10 @@ function M.insert_after_symbol(name_path, relative_path, body)
         return {error = "File not found: " .. relative_path}
     end
 
-    vim.cmd("edit " .. abs_path)
+    local bufnr = vim.fn.bufadd(abs_path)
+    vim.fn.bufload(bufnr)
 
-    local symbols = get_document_symbols()
+    local symbols = get_document_symbols(bufnr)
     if not symbols or #symbols == 0 then
         return {error = "No symbols found in file"}
     end
@@ -337,9 +361,10 @@ function M.insert_before_symbol(name_path, relative_path, body)
         return {error = "File not found: " .. relative_path}
     end
 
-    vim.cmd("edit " .. abs_path)
+    local bufnr = vim.fn.bufadd(abs_path)
+    vim.fn.bufload(bufnr)
 
-    local symbols = get_document_symbols()
+    local symbols = get_document_symbols(bufnr)
     if not symbols or #symbols == 0 then
         return {error = "No symbols found in file"}
     end
@@ -376,9 +401,10 @@ function M.rename_symbol(name_path, relative_path, new_name)
         return {error = "File not found: " .. relative_path}
     end
 
-    vim.cmd("edit " .. abs_path)
+    local bufnr = vim.fn.bufadd(abs_path)
+    vim.fn.bufload(bufnr)
 
-    local symbols = get_document_symbols()
+    local symbols = get_document_symbols(bufnr)
     if not symbols or #symbols == 0 then
         return {error = "No symbols found in file"}
     end
@@ -391,8 +417,11 @@ function M.rename_symbol(name_path, relative_path, new_name)
     end
 
     local range = target_sym.range or target_sym.location.range
+    local bufnr = vim.api.nvim_get_current_buf()
     local params = {
-        textDocument = vim.lsp.util.make_text_document_params(),
+        textDocument = {
+            uri = vim.uri_from_bufnr(bufnr)
+        },
         position = {
             line = range.start.line,
             character = range.start.character

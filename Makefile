@@ -4,7 +4,7 @@ build:
 	uv build
 
 install: build
-	uv pip install dist/nvim_mcp-0.1.0-py3-none-any.whl --force-reinstall
+	uv tool install . --force --reinstall
 
 inspect:
 	@if [ -z "$(NVIM)" ]; then \

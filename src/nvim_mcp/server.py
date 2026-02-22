@@ -76,7 +76,7 @@ def get_diagnostics(relative_path: str = "") -> str:
 
 
 @mcp.tool()
-def get_symbols_overview(relative_path: str, depth: int = 0) -> dict:
+def get_symbols_overview(relative_path: str, depth: int = 0) -> list | str:
     """
     Gets an overview of the top-level symbols defined in a given file.
 
@@ -107,7 +107,7 @@ def find_symbol(
 
 
 @mcp.tool()
-def find_referencing_symbols(name_path: str, relative_path: str) -> dict:
+def find_referencing_symbols(name_path: str, relative_path: str) -> list:
     """
     Finds symbols that reference the given symbol.
 
