@@ -93,7 +93,14 @@ def get_symbols_overview(relative_path: str, depth: int = 0) -> list | str:
 
 @mcp.tool()
 def find_symbol(
-    name_path_pattern: str, relative_path: str = "", depth: int = 0
+    name_path_pattern: str,
+    relative_path: str = "",
+    depth: int = 0,
+    include_body: bool = False,
+    include_info: bool = False,
+    include_kinds: list[int] | None = None,
+    exclude_kinds: list[int] | None = None,
+    substring_matching: bool = False,
 ) -> dict:
     """
     Performs a global (or local) search for symbols using the language server.
@@ -101,21 +108,44 @@ def find_symbol(
     :param name_path_pattern: the name path matching pattern (e.g. "MyClass/my_method")
     :param relative_path: Optional. Restrict search to this file or directory.
     :param depth: depth up to which descendants shall be retrieved. Default 0.
-    :return: a dict with symbols matching the name.
+    :param include_body: whether to include the symbol's source code.
+    :param include_info: whether to include additional info (hover-like).
+    :param include_kinds: List of LSP symbol kind integers to include.
+    :param exclude_kinds: List of LSP symbol kind integers to exclude.
+    :param substring_matching: If True, use substring matching.
+    :return: a list with symbols matching the name.
     """
-    return vim.lua.NvimMcpServer.find_symbol(name_path_pattern, relative_path, depth)
+    return vim.lua.NvimMcpServer.find_symbol(
+        name_path_pattern,
+        relative_path,
+        depth,
+        include_body,
+        include_info,
+        include_kinds,
+        exclude_kinds,
+        substring_matching,
+    )
 
 
 @mcp.tool()
-def find_referencing_symbols(name_path: str, relative_path: str) -> list:
+def find_referencing_symbols(
+    name_path: str,
+    relative_path: str,
+    include_kinds: list[int] | None = None,
+    exclude_kinds: list[int] | None = None,
+) -> dict:
     """
     Finds symbols that reference the given symbol.
 
     :param name_path: the name path of the symbol to find references for (e.g. "MyClass/my_method")
     :param relative_path: the relative path to the file containing the symbol
+    :param include_kinds: List of LSP symbol kind integers to include.
+    :param exclude_kinds: List of LSP symbol kind integers to exclude.
     :return: a dict with the symbols referencing the requested symbol
     """
-    return vim.lua.NvimMcpServer.find_referencing_symbols(name_path, relative_path)
+    return vim.lua.NvimMcpServer.find_referencing_symbols(
+        name_path, relative_path, include_kinds, exclude_kinds
+    )
 
 
 @mcp.tool()
@@ -205,8 +235,7 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="nvim-mcp-server")
-    parser.add_argument("-v", "--version",
-                        action="store_true", help="Show version")
+    parser.add_argument("-v", "--version", action="store_true", help="Show version")
     args, _ = parser.parse_known_args()
 
     if args.version:

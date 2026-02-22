@@ -15,7 +15,6 @@ local api, iter = vim.api, vim.iter
 ---@field range {start: {line: integer, character: integer}, ["end"]: {line: integer, character: integer}}|nil
 ---@field children ParsedSymbol[]|nil
 ---@field relative_path string|nil
----@field content_around_reference string|nil
 
 ---@param symbols any[]
 ---@param result ParsedSymbol[]
@@ -51,9 +50,7 @@ local function parse_symbol_tree(symbols, result, prefix)
 				detail = symbol.detail,
 				location = location,
 				range = range,
-				children = nil,
-				relative_path = nil,
-				content_around_reference = nil
+				children = nil
 			}
 			table.insert(result, parsed)
 
@@ -89,7 +86,8 @@ local function find_symbol_by_name_path(symbols, name_path)
 				if depth == #parts then
 					return sym
 				elseif sym.children then
-					local found = find_in_symbols(---@cast syms ParsedSymbol[], sym.children, depth + 1)
+					local children = sym.children
+					local found = find_in_symbols(children, depth + 1)
 					if found then return found end
 				end
 			end
@@ -223,22 +221,47 @@ function M.get_symbols_overview(relative_path, depth)
 	end
 
 	local parsed = parse_symbol_tree(symbols, {}, "")
-	-- Add relative_path to each symbol
+
+	-- Filter and format like Serena: name=True, kind=True, no name_path, no location
+	-- Filter out low-level symbols (kind >= 13 = Variable and above)
+	---@type table[]
+	local filtered = {}
 	for _, sym in ipairs(parsed) do
-		sym.relative_path = relative_path
+		-- Skip low-level symbols (Variable=13 and above)
+		if sym.kind and sym.kind >= 13 then
+		else
+			---@type table
+			local entry = {
+				name = sym.name,
+				kind = sym.kind
+			}
+			-- Add children if depth > 0
+			if depth > 0 and sym.children then
+				entry.children = sym.children
+			end
+			table.insert(filtered, entry)
+		end
 	end
 
 	-- Group by kind like Serena
-	local grouped = group_by_kind(parsed)
+	local grouped = group_by_kind(filtered)
 	return grouped
 end
 
 ---@param name_path_pattern string
 ---@param relative_path string|nil
 ---@param depth integer|nil
----@return ParsedSymbol[]
-function M.find_symbol(name_path_pattern, relative_path, depth)
+---@param include_body boolean|nil
+---@param include_info boolean|nil
+---@param include_kinds integer[]|nil
+---@param exclude_kinds integer[]|nil
+---@param substring_matching boolean|nil
+---@return table[]
+function M.find_symbol(name_path_pattern, relative_path, depth, include_body, include_info, include_kinds, exclude_kinds, substring_matching)
 	depth = depth or 0
+	include_body = include_body or false
+	include_info = include_info or false
+	substring_matching = substring_matching or false
 	local bufnr = nil
 
 	if relative_path and relative_path ~= "" then
@@ -258,23 +281,61 @@ function M.find_symbol(name_path_pattern, relative_path, depth)
 		local parsed = parse_symbol_tree(symbols, {}, "")
 
 		local pattern = name_path_pattern:lower()
-		---@type ParsedSymbol[]
+		---@type table[]
 		local results = {}
 
 		---@param sym ParsedSymbol
 		---@return boolean
 		local function match_symbol(sym)
-			local name_lower = sym.name:lower()
-			return name_lower:find(pattern, 1, true) ~= nil
+			if substring_matching then
+				return sym.name:lower():find(pattern, 1, true) ~= nil
+			else
+				return sym.name:lower() == pattern
+			end
 		end
 
 		---@param syms ParsedSymbol[]|nil
 		local function collect_matches(syms)
 			for _, sym in ipairs(syms or {}) do
-				if match_symbol(sym) then
-					sym.relative_path = relative_path
-					table.insert(results, sym)
+				-- Filter by kind
+				local include = true
+				if include_kinds and #include_kinds > 0 then
+					include = false
+					for _, k in ipairs(include_kinds) do
+						if sym.kind == k then include = true break end
+					end
 				end
+				if include and exclude_kinds and #exclude_kinds > 0 then
+					for _, k in ipairs(exclude_kinds) do
+						if sym.kind == k then include = false break end
+					end
+				end
+
+				if include and match_symbol(sym) then
+					---@type table
+					local entry = {
+						name = sym.name,
+						name_path = sym.name_path,
+						kind = sym.kind,
+						relative_path = relative_path,
+						location = sym.location,
+						range = sym.range,
+						body_location = sym.range
+					}
+
+					-- Add body if requested
+					if include_body then
+						entry.body = "TODO: get body content"
+					end
+
+					-- Add children if depth > 0
+					if depth > 0 and sym.children then
+						entry.children = sym.children
+					end
+
+					table.insert(results, entry)
+				end
+
 				if sym.children and depth > 0 then
 					collect_matches(sym.children)
 				end
@@ -283,6 +344,11 @@ function M.find_symbol(name_path_pattern, relative_path, depth)
 
 		collect_matches(parsed)
 
+		-- Add info if requested (would need hover)
+		if include_info and not include_body and #results > 0 then
+			-- TODO: implement hover info
+		end
+
 		return results
 	end
 	return {}
@@ -290,8 +356,10 @@ end
 
 ---@param name_path string
 ---@param relative_path string
+---@param include_kinds integer[]|nil
+---@param exclude_kinds integer[]|nil
 ---@return table
-function M.find_referencing_symbols(name_path, relative_path)
+function M.find_referencing_symbols(name_path, relative_path, include_kinds, exclude_kinds)
 	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
 	if vim.fn.filereadable(abs_path) == 0 then
 		return { error = "File not found: " .. relative_path }
@@ -329,7 +397,7 @@ function M.find_referencing_symbols(name_path, relative_path)
 
 	local results = vim.lsp.buf_request_sync(bufnr, "textDocument/references", params, 1000)
 
-	---@type ParsedSymbol[]
+	---@type table[]
 	local refs = {}
 	for _, resp in pairs(results or {}) do
 		if resp and resp.result then
@@ -345,16 +413,11 @@ function M.find_referencing_symbols(name_path, relative_path)
 				local ref_line = ref_range.start.line
 				local content = get_content_around_line(ref_bufnr, ref_line, 1, 1)
 
-				---@type ParsedSymbol
+				---@type table
 				local ref_sym = {
-					name = "",
-					name_path = "",
-					kind = 0,
-					detail = nil,
-					location = { uri = ref_uri, range = ref_range },
-					range = ref_range,
-					children = nil,
 					relative_path = ref_rel_path,
+					location = { uri = ref_uri, range = ref_range },
+					body_location = ref_range,
 					content_around_reference = content
 				}
 
@@ -374,17 +437,33 @@ function M.find_referencing_symbols(name_path, relative_path)
 					end
 				end
 
-				table.insert(refs, ref_sym)
+				-- Filter by kind
+				local skip = false
+				if include_kinds and #include_kinds > 0 then
+					skip = true
+					for _, k in ipairs(include_kinds) do
+						if ref_sym.kind == k then skip = false break end
+					end
+				end
+				if not skip and exclude_kinds and #exclude_kinds > 0 then
+					for _, k in ipairs(exclude_kinds) do
+						if ref_sym.kind == k then skip = true break end
+					end
+				end
+
+				if not skip then
+					table.insert(refs, ref_sym)
+				end
 			end
 		end
 	end
 
 	-- Group by relative_path and kind like Serena
-	---@type table<string, table<string, ParsedSymbol[]>>
+	---@type table<string, table<string, table[]>>
 	local grouped = {}
 	for _, ref in ipairs(refs) do
 		local rel_path = ref.relative_path or "unknown"
-		local kind_name = vim.lsp.protocol.SymbolKind[ref.kind] or "Unknown"
+		local kind_name = ref.kind and vim.lsp.protocol.SymbolKind[ref.kind] or "Unknown"
 		if not grouped[rel_path] then
 			grouped[rel_path] = {}
 		end
@@ -400,7 +479,7 @@ end
 ---@param name_path string
 ---@param relative_path string
 ---@param body string
----@return table
+---@return string|table
 function M.replace_symbol_body(name_path, relative_path, body)
 	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
 	if vim.fn.filereadable(abs_path) == 0 then
@@ -432,13 +511,13 @@ function M.replace_symbol_body(name_path, relative_path, body)
 
 	vim.lsp.util.apply_text_edits({ text_edit }, bufnr, "utf-8")
 
-	return { success = true, message = "Symbol body replaced" }
+	return "OK"
 end
 
 ---@param name_path string
 ---@param relative_path string
 ---@param body string
----@return table
+---@return string|table
 function M.insert_after_symbol(name_path, relative_path, body)
 	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
 	if vim.fn.filereadable(abs_path) == 0 then
@@ -478,13 +557,13 @@ function M.insert_after_symbol(name_path, relative_path, body)
 
 	vim.lsp.util.apply_text_edits({ text_edit }, bufnr, "utf-8")
 
-	return { success = true, message = "Content inserted after symbol" }
+	return "OK"
 end
 
 ---@param name_path string
 ---@param relative_path string
 ---@param body string
----@return table
+---@return string|table
 function M.insert_before_symbol(name_path, relative_path, body)
 	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
 	if vim.fn.filereadable(abs_path) == 0 then
@@ -524,13 +603,13 @@ function M.insert_before_symbol(name_path, relative_path, body)
 
 	vim.lsp.util.apply_text_edits({ text_edit }, bufnr, "utf-8")
 
-	return { success = true, message = "Content inserted before symbol" }
+	return "OK"
 end
 
 ---@param name_path string
 ---@param relative_path string
 ---@param new_name string
----@return table
+---@return string|table
 function M.rename_symbol(name_path, relative_path, new_name)
 	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
 	if vim.fn.filereadable(abs_path) == 0 then
@@ -587,13 +666,13 @@ function M.rename_symbol(name_path, relative_path, new_name)
 	end
 
 	if success then
-		return { success = true, message = string.format("Renamed %s to %s (%d changes applied)", name_path, new_name, changes_count) }
+		return "OK"
 	else
 		return { error = "Rename failed - language server may not support rename" }
 	end
 end
 
----@return table
+---@return string|table
 function M.restart_language_server()
 	local clients = vim.lsp.get_clients()
 	local count = 0
@@ -606,7 +685,7 @@ function M.restart_language_server()
 		vim.cmd("LspRestart")
 	end, 100)
 
-	return { success = true, message = string.format("LSP servers restarted (%d clients)", count), restarted = count }
+	return "OK"
 end
 
 ---@return table
