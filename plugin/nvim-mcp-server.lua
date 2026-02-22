@@ -5,6 +5,7 @@ vim.g.NvimMcpServerLoaded = true
 
 local M = {}
 local api, iter = vim.api, vim.iter
+local SUCCESS_RESULT = "OK"
 
 ---@class ParsedSymbol
 ---@field name string
@@ -511,7 +512,7 @@ function M.replace_symbol_body(name_path, relative_path, body)
 
 	vim.lsp.util.apply_text_edits({ text_edit }, bufnr, "utf-8")
 
-	return "OK"
+	return SUCCESS_RESULT
 end
 
 ---@param name_path string
@@ -557,7 +558,7 @@ function M.insert_after_symbol(name_path, relative_path, body)
 
 	vim.lsp.util.apply_text_edits({ text_edit }, bufnr, "utf-8")
 
-	return "OK"
+	return SUCCESS_RESULT
 end
 
 ---@param name_path string
@@ -603,7 +604,7 @@ function M.insert_before_symbol(name_path, relative_path, body)
 
 	vim.lsp.util.apply_text_edits({ text_edit }, bufnr, "utf-8")
 
-	return "OK"
+	return SUCCESS_RESULT
 end
 
 ---@param name_path string
@@ -666,10 +667,32 @@ function M.rename_symbol(name_path, relative_path, new_name)
 	end
 
 	if success then
-		return "OK"
+		return SUCCESS_RESULT
 	else
 		return { error = "Rename failed - language server may not support rename" }
 	end
+end
+
+---@param relative_path string
+---@return table
+function M.format(relative_path)
+	local abs_path = vim.fn.fnamemodify(relative_path, ":p")
+	if vim.fn.filereadable(abs_path) == 0 then
+		return { error = "File not found: " .. relative_path }
+	end
+	local bufnr = vim.fn.bufadd(abs_path)
+    vim.fn.bufload(bufnr)
+	local prev_lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    vim.lsp.buf.format({ bufnr = bufnr })
+    local new_lines = api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local diff = vim.text.diff(
+		table.concat(prev_lines, "\n") .. "\n",
+        table.concat(new_lines, "\n") .. "\n"
+    )
+    return {
+		message = "Format applied successfully",
+		changes = diff
+	}
 end
 
 ---@return string|table
@@ -685,7 +708,7 @@ function M.restart_language_server()
 		vim.cmd("LspRestart")
 	end, 100)
 
-	return "OK"
+	return SUCCESS_RESULT
 end
 
 ---@return table

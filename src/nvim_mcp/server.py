@@ -101,7 +101,7 @@ def find_symbol(
     include_kinds: list[int] | None = None,
     exclude_kinds: list[int] | None = None,
     substring_matching: bool = False,
-) -> dict:
+) -> dict | str:
     """
     Performs a global (or local) search for symbols using the language server.
 
@@ -133,7 +133,7 @@ def find_referencing_symbols(
     relative_path: str,
     include_kinds: list[int] | None = None,
     exclude_kinds: list[int] | None = None,
-) -> dict:
+) -> dict | str:
     """
     Finds symbols that reference the given symbol.
 
@@ -149,7 +149,7 @@ def find_referencing_symbols(
 
 
 @mcp.tool()
-def replace_symbol_body(name_path: str, relative_path: str, body: str) -> dict:
+def replace_symbol_body(name_path: str, relative_path: str, body: str) -> dict | str:
     """
     Replaces the full definition of a symbol.
 
@@ -162,7 +162,7 @@ def replace_symbol_body(name_path: str, relative_path: str, body: str) -> dict:
 
 
 @mcp.tool()
-def insert_after_symbol(name_path: str, relative_path: str, body: str) -> dict:
+def insert_after_symbol(name_path: str, relative_path: str, body: str) -> dict | str:
     """
     Inserts content after the end of the definition of a given symbol.
 
@@ -175,7 +175,7 @@ def insert_after_symbol(name_path: str, relative_path: str, body: str) -> dict:
 
 
 @mcp.tool()
-def insert_before_symbol(name_path: str, relative_path: str, body: str) -> dict:
+def insert_before_symbol(name_path: str, relative_path: str, body: str) -> dict | str:
     """
     Inserts content before the beginning of the definition of a given symbol.
 
@@ -188,7 +188,7 @@ def insert_before_symbol(name_path: str, relative_path: str, body: str) -> dict:
 
 
 @mcp.tool()
-def rename_symbol(name_path: str, relative_path: str, new_name: str) -> dict:
+def rename_symbol(name_path: str, relative_path: str, new_name: str) -> dict | str:
     """
     Renames a symbol throughout the codebase using language server refactoring.
 
@@ -201,7 +201,7 @@ def rename_symbol(name_path: str, relative_path: str, new_name: str) -> dict:
 
 
 @mcp.tool()
-def format(relative_path: str) -> dict:
+def format(relative_path: str) -> dict | str:
     """
     Formats a file using the language server.
 
@@ -212,7 +212,7 @@ def format(relative_path: str) -> dict:
 
 
 @mcp.tool()
-def restart_language_server() -> dict:
+def restart_language_server() -> dict | str:
     """
     Restarts the LSP server. This may be necessary when edits not through MCP happen.
 
@@ -222,7 +222,7 @@ def restart_language_server() -> dict:
 
 
 @mcp.tool()
-def get_lsp_client_info() -> dict:
+def get_lsp_client_info() -> dict | str:
     """
     Get information about the active LSP clients.
 
